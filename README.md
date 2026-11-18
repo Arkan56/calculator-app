@@ -11,6 +11,7 @@ A full-stack calculator built with a **Go / Gin REST API** backend and a **React
   - [Prerequisites](#prerequisites)
   - [Backend Setup](#backend-setup)
   - [Frontend Setup](#frontend-setup)
+  - [Running with Docker](#running-with-docker)
 - [Frontend](#frontend)
   - [Technologies](#technologies)
   - [Source layout](#source-layout)
@@ -47,28 +48,32 @@ calculator-app/
 │   │       └── calculator.go        # Request / response DTOs
 │   ├── go.mod
 │   └── go.sum
-└── frontend/
-    ├── src/
-    │   ├── api/
-    │   │   └── calculatorApi.ts       # fetch client for /api/v1
-    │   ├── components/
-    │   │   ├── Display.tsx            # Readout, pending operation, errors
-    │   │   └── Keypad.tsx             # Buttons for digits and operations
-    │   ├── hooks/
-    │   │   └── useCalculator.ts       # Input state and operation chaining
-    │   ├── types/
-    │   │   └── calculator.ts          # Operation names and request/response types
-    │   ├── __tests__/
-    │   │   ├── Calculator.test.tsx    # UI interaction tests
-    │   │   └── calculatorApi.test.ts  # fetch client tests
-    │   ├── test/
-    │   │   └── setup.ts               # Vitest + Testing Library setup
-    │   ├── App.tsx                    # Layout and keyboard handling
-    │   ├── main.tsx                   # React entry
-    │   └── index.css                  # Tailwind directives
-    ├── index.html
-    ├── package.json
-    └── vite.config.ts                 # Vite config and Vitest options
+├── frontend/
+│   ├── src/
+│   │   ├── api/
+│   │   │   └── calculatorApi.ts       # fetch client for /api/v1
+│   │   ├── components/
+│   │   │   ├── Display.tsx            # Readout, pending operation, errors
+│   │   │   └── Keypad.tsx             # Buttons for digits and operations
+│   │   ├── hooks/
+│   │   │   └── useCalculator.ts       # Input state and operation chaining
+│   │   ├── types/
+│   │   │   └── calculator.ts          # Operation names and request/response types
+│   │   ├── __tests__/
+│   │   │   ├── Calculator.test.tsx    # UI interaction tests
+│   │   │   └── calculatorApi.test.ts  # fetch client tests
+│   │   ├── test/
+│   │   │   └── setup.ts               # Vitest + Testing Library setup
+│   │   ├── App.tsx                    # Layout and keyboard handling
+│   │   ├── main.tsx                   # React entry
+│   │   └── index.css                  # Tailwind directives
+│   ├── index.html
+│   ├── package.json
+│   └── vite.config.ts                 # Vite config and Vitest options
+├── Dockerfile                         # Multi-stage build with `backend` and `frontend` targets
+├── docker-compose.yml                 # Runs both services together
+├── nginx.conf                         # Serves the SPA and proxies /api to the backend
+└── .dockerignore                      # Keeps the Docker build context small
 ```
 
 ---
@@ -77,11 +82,12 @@ calculator-app/
 
 ### Prerequisites
 
-| Tool | Version |
-|------|---------|
-| Go   | ≥ 1.21  |
-| Node | ≥ 18    |
-| npm  | ≥ 9     |
+| Tool              | Version                                         |
+| ----------------- | ----------------------------------------------- |
+| Go                | ≥ 1.26.10                                       |
+| Node              | ≥ 20.19 (22 recommended)                        |
+| npm               | ≥ 9                                             |
+| Docker (optional) | Docker Desktop or Docker Engine with Compose v2 |
 
 ### Backend Setup
 
@@ -119,6 +125,38 @@ The client posts to `http://localhost:8080/api/v1` unless `VITE_API_URL` is set.
 > [!NOTE]
 > The backend allows CORS requests from `http://localhost:5173` out of the box, so no proxy configuration is needed during development.
 
+To run everything without installing Go or Node locally, see [Running with Docker](#running-with-docker).
+
+### Running with Docker
+
+Run the whole app (API and UI) with one command from the project root:
+
+```bash
+docker compose up --build
+```
+
+Then open `http://localhost:3000`.
+
+| Service    | Image                        | Role                                                          |
+| ---------- | ---------------------------- | ------------------------------------------------------------- |
+| `backend`  | Go binary on distroless      | REST API on port 8080 (internal only)                         |
+| `frontend` | nginx serving the Vite build | Serves the UI on port 3000 and proxies `/api/` to the backend |
+
+How it fits together:
+
+- The `Dockerfile` has two targets, `backend` and `frontend`, which `docker-compose.yml` builds and runs.
+- The frontend is built with `VITE_API_URL=/api/v1`, so the browser calls the same origin and nginx forwards the request to the backend. No CORS configuration is needed in this setup.
+- `VITE_API_URL` is baked in at **build time**. After changing it, rebuild with `docker compose up --build`.
+- The backend port is not published by default. To call the API directly (for example with `curl`), uncomment the `ports` entry on the `backend` service in `docker-compose.yml`.
+- If you change the backend `PORT`, update the `proxy_pass` line in `nginx.conf` to match.
+- The Go version in the `Dockerfile` (`GO_VERSION`) must satisfy the requirement in `backend/go.mod`.
+
+Stop and clean up:
+
+```bash
+docker compose down
+```
+
 ---
 
 ## Frontend
@@ -129,27 +167,27 @@ The UI is a single calculator screen. It keeps the current entry locally and sen
 
 Runtime dependencies are React 19 (`react`, `react-dom`). Everything else is a dev dependency. Ranges below match `frontend/package.json`:
 
-| Area | Packages |
-|------|----------|
-| Build | Vite 8, `@vitejs/plugin-react`, TypeScript 6 |
-| Style | Tailwind CSS 3, PostCSS, Autoprefixer |
-| Lint | ESLint 10, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` |
-| Test | Vitest 5, jsdom, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`, `@vitest/coverage-v8` |
+| Area  | Packages                                                                                                                     |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Build | Vite 8, `@vitejs/plugin-react`, TypeScript 6                                                                                 |
+| Style | Tailwind CSS 3, PostCSS, Autoprefixer                                                                                        |
+| Lint  | ESLint 10, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`                                   |
+| Test  | Vitest 5, jsdom, `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`, `@vitest/coverage-v8` |
 
 `vite.config.ts` sets the Vitest environment to jsdom and loads `src/test/setup.ts`, which registers jest-dom matchers and unmounts the rendered tree after each test. Coverage uses the v8 provider and writes text plus HTML under `frontend/coverage/`. `main.tsx`, `src/test/**`, and test files are excluded from that report.
 
 ### Source layout
 
-| Path | Role |
-|------|------|
-| `src/main.tsx` | Mounts `<App />` in `#root` |
-| `src/App.tsx` | Centers the calculator and maps keyboard input to the hook |
-| `src/hooks/useCalculator.ts` | Display state, chaining, and in-flight request lock |
-| `src/api/calculatorApi.ts` | `calculateBinary` and `calculateUnary` |
-| `src/types/calculator.ts` | Operation slugs and the JSON shapes shared with the Go DTOs |
-| `src/components/Display.tsx` | Pending line, error alert, numeric readout |
-| `src/components/Keypad.tsx` | Digit, utility, operator, and equals buttons |
-| `src/index.css` | `@tailwind` base, components, and utilities |
+| Path                         | Role                                                        |
+| ---------------------------- | ----------------------------------------------------------- |
+| `src/main.tsx`               | Mounts `<App />` in `#root`                                 |
+| `src/App.tsx`                | Centers the calculator and maps keyboard input to the hook  |
+| `src/hooks/useCalculator.ts` | Display state, chaining, and in-flight request lock         |
+| `src/api/calculatorApi.ts`   | `calculateBinary` and `calculateUnary`                      |
+| `src/types/calculator.ts`    | Operation slugs and the JSON shapes shared with the Go DTOs |
+| `src/components/Display.tsx` | Pending line, error alert, numeric readout                  |
+| `src/components/Keypad.tsx`  | Digit, utility, operator, and equals buttons                |
+| `src/index.css`              | `@tailwind` base, components, and utilities                 |
 
 Tailwind scans `index.html` and `src/**/*.{js,ts,jsx,tsx}`.
 
@@ -157,29 +195,29 @@ Tailwind scans `index.html` and `src/**/*.{js,ts,jsx,tsx}`.
 
 The keypad is a 4-column grid:
 
-| Control | Action |
-|---------|--------|
-| `0`–`9` | Append a digit. A leading `0` or `-0` is replaced, so `05` becomes `5`. |
-| `.` | Append one decimal point. A second `.` is ignored (`1.2.3` stays `1.23`). |
-| `+/-` | Toggle the sign. Right after an operator, the next operand starts as `-0`. |
-| `DEL` | Delete the last character, unless the screen is showing a result or a stored operand. |
-| `AC` | Reset the entry, the pending operation, and any error. |
-| `+`, `−`, `×`, `÷`, `xʸ`, `%` | Binary operations: add, subtract, multiply, divide, power, percentage. |
-| `√` | Square root. It runs immediately and does not need `=`. |
-| `=` | Evaluate the pending binary operation. |
+| Control                       | Action                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------- |
+| `0`–`9`                       | Append a digit. A leading `0` or `-0` is replaced, so `05` becomes `5`.               |
+| `.`                           | Append one decimal point. A second `.` is ignored (`1.2.3` stays `1.23`).             |
+| `+/-`                         | Toggle the sign. Right after an operator, the next operand starts as `-0`.            |
+| `DEL`                         | Delete the last character, unless the screen is showing a result or a stored operand. |
+| `AC`                          | Reset the entry, the pending operation, and any error.                                |
+| `+`, `−`, `×`, `÷`, `xʸ`, `%` | Binary operations: add, subtract, multiply, divide, power, percentage.                |
+| `√`                           | Square root. It runs immediately and does not need `=`.                               |
+| `=`                           | Evaluate the pending binary operation.                                                |
 
 While a request is in flight, every button is disabled and the readout dims. A spinner is exposed to assistive tech as "Calculating". Domain and network failures render in an alert above the number; entering a digit, a decimal, toggling the sign, backspacing, or pressing `AC` clears that alert.
 
 Keyboard input is handled on `window` and ignored when Ctrl, Meta, or Alt is held, when the event target is an input, textarea, select, or contenteditable element, and while a request is loading or the key is repeating.
 
-| Key | Action |
-|-----|--------|
-| `0`–`9` | Digit |
-| `.` or `,` | Decimal point |
+| Key                          | Action                                             |
+| ---------------------------- | -------------------------------------------------- |
+| `0`–`9`                      | Digit                                              |
+| `.` or `,`                   | Decimal point                                      |
 | `+`, `-`, `*`, `/`, `^`, `%` | Add, subtract, multiply, divide, power, percentage |
-| `Enter` or `=` | Equals |
-| `Backspace` | Delete |
-| `Escape` | Clear |
+| `Enter` or `=`               | Equals                                             |
+| `Backspace`                  | Delete                                             |
+| `Escape`                     | Clear                                              |
 
 `√` and `+/-` are pointer-only.
 
@@ -189,10 +227,10 @@ Keyboard input is handled on `window` and ignored when Ctrl, Meta, or Alt is hel
 
 Each evaluation calls the API once:
 
-| UI | Client | Request |
-|----|--------|---------|
+| UI             | Client                             | Request                                       |
+| -------------- | ---------------------------------- | --------------------------------------------- |
 | `+ − × ÷ xʸ %` | `calculateBinary(operation, a, b)` | `POST {base}/{operation}` with `{ "a", "b" }` |
-| `√` | `calculateUnary('sqrt', a)` | `POST {base}/sqrt` with `{ "a" }` |
+| `√`            | `calculateUnary('sqrt', a)`        | `POST {base}/sqrt` with `{ "a" }`             |
 
 `{base}` is `import.meta.env.VITE_API_URL` or `http://localhost:8080/api/v1`. Both functions send `Content-Type: application/json`. A 2xx body must be `{ "result": number }`. Any other status throws an `Error` whose message is the JSON `error` field, or `An unexpected error occurred.` when that field is missing. If `fetch` itself rejects, the message is `Network error: unable to reach the calculator API.` A ref blocks a second request until the first settles, because `isLoading` updates asynchronously.
 
@@ -202,14 +240,14 @@ Request and response fields, status codes, and domain errors are specified in th
 
 Run these from `frontend/`:
 
-| Script | Runs | Purpose |
-|--------|------|---------|
-| `npm run dev` | `vite` | Dev server with HMR at `http://localhost:5173` |
-| `npm run build` | `tsc -b && vite build` | Typecheck, then production bundle |
-| `npm run preview` | `vite preview` | Serve the production bundle |
-| `npm run lint` | `eslint .` | Lint the project (`dist/` and `coverage/` are ignored) |
-| `npm test` | `vitest run` | Run the suite once |
-| `npm run test:coverage` | `vitest run --coverage` | Run the suite and write a v8 report |
+| Script                  | Runs                    | Purpose                                                |
+| ----------------------- | ----------------------- | ------------------------------------------------------ |
+| `npm run dev`           | `vite`                  | Dev server with HMR at `http://localhost:5173`         |
+| `npm run build`         | `tsc -b && vite build`  | Typecheck, then production bundle                      |
+| `npm run preview`       | `vite preview`          | Serve the production bundle                            |
+| `npm run lint`          | `eslint .`              | Lint the project (`dist/` and `coverage/` are ignored) |
+| `npm test`              | `vitest run`            | Run the suite once                                     |
+| `npm run test:coverage` | `vitest run --coverage` | Run the suite and write a v8 report                    |
 
 ### Frontend tests
 
@@ -259,6 +297,7 @@ GET /health
 ```
 
 **Response `200 OK`**
+
 ```json
 { "status": "ok" }
 ```
@@ -273,9 +312,9 @@ All binary endpoints share the same request shape:
 POST /api/v1/{operation}
 ```
 
-| Field | Type     | Required | Description   |
-|-------|----------|----------|---------------|
-| `a`   | `number` | ✅       | First operand |
+| Field | Type     | Required | Description    |
+| ----- | -------- | -------- | -------------- |
+| `a`   | `number` | ✅       | First operand  |
 | `b`   | `number` | ✅       | Second operand |
 
 > [!IMPORTANT]
@@ -283,16 +322,17 @@ POST /api/v1/{operation}
 
 **Available operations:**
 
-| Endpoint            | Formula          |
-|---------------------|------------------|
-| `POST /api/v1/add`        | `a + b`          |
-| `POST /api/v1/subtract`   | `a - b`          |
-| `POST /api/v1/multiply`   | `a × b`          |
-| `POST /api/v1/divide`     | `a ÷ b`          |
-| `POST /api/v1/power`      | `aᵇ`             |
-| `POST /api/v1/percentage` | `(a ÷ 100) × b`  |
+| Endpoint                  | Formula         |
+| ------------------------- | --------------- |
+| `POST /api/v1/add`        | `a + b`         |
+| `POST /api/v1/subtract`   | `a - b`         |
+| `POST /api/v1/multiply`   | `a × b`         |
+| `POST /api/v1/divide`     | `a ÷ b`         |
+| `POST /api/v1/power`      | `aᵇ`            |
+| `POST /api/v1/percentage` | `(a ÷ 100) × b` |
 
 **Response `200 OK`**
+
 ```json
 { "result": 42 }
 ```
@@ -301,16 +341,18 @@ POST /api/v1/{operation}
 
 ### Unary Operations
 
-| Endpoint          | Formula  | Input Field |
-|-------------------|----------|-------------|
-| `POST /api/v1/sqrt` | `√a`   | `a` only    |
+| Endpoint            | Formula | Input Field |
+| ------------------- | ------- | ----------- |
+| `POST /api/v1/sqrt` | `√a`    | `a` only    |
 
 **Request**
+
 ```json
 { "a": 16 }
 ```
 
 **Response `200 OK`**
+
 ```json
 { "result": 4 }
 ```
@@ -325,14 +367,14 @@ All errors return `400 Bad Request` with a JSON body:
 { "error": "<human-readable message>" }
 ```
 
-| Scenario                              | Error message                                        |
-|---------------------------------------|------------------------------------------------------|
-| Missing required field                | `invalid request: Key: 'BinaryRequest.B' Error:...` |
-| Wrong data type (e.g. string instead of number) | `invalid request: ...`                     |
-| Malformed JSON                        | `invalid request: ...`                               |
-| Division by zero                      | `division by zero is not allowed`                    |
-| Square root of a negative number      | `square root of a negative number is not allowed`    |
-| Result is NaN or ±Infinity            | `invalid input: result is not a finite number`       |
+| Scenario                                        | Error message                                       |
+| ----------------------------------------------- | --------------------------------------------------- |
+| Missing required field                          | `invalid request: Key: 'BinaryRequest.B' Error:...` |
+| Wrong data type (e.g. string instead of number) | `invalid request: ...`                              |
+| Malformed JSON                                  | `invalid request: ...`                              |
+| Division by zero                                | `division by zero is not allowed`                   |
+| Square root of a negative number                | `square root of a negative number is not allowed`   |
+| Result is NaN or ±Infinity                      | `invalid input: result is not a finite number`      |
 
 ---
 
@@ -345,6 +387,7 @@ curl -s -X POST http://localhost:8080/api/v1/add \
   -H "Content-Type: application/json" \
   -d '{"a": 3, "b": 7}'
 ```
+
 ```json
 { "result": 10 }
 ```
@@ -356,6 +399,7 @@ curl -s -X POST http://localhost:8080/api/v1/subtract \
   -H "Content-Type: application/json" \
   -d '{"a": 0, "b": 5}'
 ```
+
 ```json
 { "result": -5 }
 ```
@@ -367,6 +411,7 @@ curl -s -X POST http://localhost:8080/api/v1/multiply \
   -H "Content-Type: application/json" \
   -d '{"a": -3, "b": -4}'
 ```
+
 ```json
 { "result": 12 }
 ```
@@ -378,6 +423,7 @@ curl -s -X POST http://localhost:8080/api/v1/divide \
   -H "Content-Type: application/json" \
   -d '{"a": 10, "b": 4}'
 ```
+
 ```json
 { "result": 2.5 }
 ```
@@ -389,6 +435,7 @@ curl -s -X POST http://localhost:8080/api/v1/divide \
   -H "Content-Type: application/json" \
   -d '{"a": 5, "b": 0}'
 ```
+
 ```json
 { "error": "division by zero is not allowed" }
 ```
@@ -400,6 +447,7 @@ curl -s -X POST http://localhost:8080/api/v1/power \
   -H "Content-Type: application/json" \
   -d '{"a": 2, "b": 10}'
 ```
+
 ```json
 { "result": 1024 }
 ```
@@ -411,6 +459,7 @@ curl -s -X POST http://localhost:8080/api/v1/percentage \
   -H "Content-Type: application/json" \
   -d '{"a": 15, "b": 200}'
 ```
+
 ```json
 { "result": 30 }
 ```
@@ -422,6 +471,7 @@ curl -s -X POST http://localhost:8080/api/v1/sqrt \
   -H "Content-Type: application/json" \
   -d '{"a": 16}'
 ```
+
 ```json
 { "result": 4 }
 ```
@@ -433,6 +483,7 @@ curl -s -X POST http://localhost:8080/api/v1/sqrt \
   -H "Content-Type: application/json" \
   -d '{"a": -4}'
 ```
+
 ```json
 { "error": "square root of a negative number is not allowed" }
 ```
@@ -444,8 +495,11 @@ curl -s -X POST http://localhost:8080/api/v1/add \
   -H "Content-Type: application/json" \
   -d '{"a": 5}'
 ```
+
 ```json
-{ "error": "invalid request: Key: 'BinaryRequest.B' Error:Field validation for 'B' failed on the 'required' tag" }
+{
+  "error": "invalid request: Key: 'BinaryRequest.B' Error:Field validation for 'B' failed on the 'required' tag"
+}
 ```
 
 ### Validation error — wrong type
@@ -455,6 +509,7 @@ curl -s -X POST http://localhost:8080/api/v1/add \
   -H "Content-Type: application/json" \
   -d '{"a": "hello", "b": 2}'
 ```
+
 ```json
 { "error": "invalid request: ..." }
 ```
@@ -499,6 +554,20 @@ Domain errors (`ErrDivisionByZero`, `ErrNegativeSquareRoot`, `ErrInvalidInput`) 
 
 ---
 
+### Reverse Proxy Instead of Cross-Origin Requests in Docker
+
+In the Docker setup, nginx serves the built frontend and forwards `/api/` to the backend container. The frontend is built with a relative `VITE_API_URL` (`/api/v1`), so the browser only ever talks to one origin.
+
+**Why:**
+
+- **No CORS in production-style runs** — the backend's CORS allow-list only needs to cover the Vite dev server (`http://localhost:5173`); the containerized app never makes a cross-origin request.
+- **Smaller attack surface** — the backend port is not published to the host by default; only nginx is reachable.
+- **Separate containers** — each process has its own lifecycle, logs, and restart policy, instead of running both in one container with a process supervisor.
+
+**Trade-off accepted:** `VITE_API_URL` is resolved at build time, so pointing the frontend at a different API requires rebuilding the image.
+
+---
+
 ## Test Coverage
 
 Backend results are below. Frontend results are in [Frontend tests](#frontend-tests).
@@ -535,13 +604,14 @@ calculator-api/internal/handlers/calculator_handler.go  mapDomainError  80.0%
 total:                                                              91.2%
 ```
 
-| Package                      | Coverage  |
-|------------------------------|-----------|
-| `internal/calculator`        | **100.0%** |
-| `internal/handlers`          | **86.1%** |
-| **Total**                    | **91.2%** |
+| Package               | Coverage   |
+| --------------------- | ---------- |
+| `internal/calculator` | **100.0%** |
+| `internal/handlers`   | **86.1%**  |
+| **Total**             | **91.2%**  |
 
 > [!NOTE]
 > The two branches below 100% are intentionally unreachable via the HTTP layer:
+>
 > - **`handleBinary` / `handleUnary` NaN/Inf guard (83.3%)** — standard JSON does not support `NaN` or `Infinity` literals, so this guard can never be triggered through Gin's JSON parser. It exists as a defensive layer if handlers are ever called directly.
 > - **`mapDomainError` default branch (80.0%)** — a catch-all for future, currently non-existent error types. No domain function produces an unmapped error today.
